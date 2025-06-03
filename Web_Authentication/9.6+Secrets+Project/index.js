@@ -15,6 +15,7 @@ env.config();
 
 app.use(
   session({
+    name: "secret.sid",
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
@@ -56,18 +57,26 @@ app.get("/logout", (req, res) => {
   });
 });
 
-app.get("/secrets", (req, res) => {
+app.get("/secrets", async (req, res) => {
   if (req.isAuthenticated()) {
-    res.render("secrets.ejs");
+    try {
+      const result = await db.query("SELECT * FROM users WHERE id = $1", [
+        req.user.id,
+      ]);
+      if (result.rows.length === 0) {
+        throw new Error("No data not found");
+      }
+      const { secret } = result.rows[0];
 
-    //TODO: Update this to pull in the user secret to render in secrets.ejs
+      res.render("secrets.ejs", { secret: !secret ? "No secret added": secret });
+    } catch (error) {
+      console.error("Error fetching user data:", error);
+      return res.redirect("/login");
+    }
   } else {
     res.redirect("/login");
   }
 });
-
-//TODO: Add a get route for the submit button
-//Think about how the logic should work with authentication.
 
 app.get(
   "/auth/google",
@@ -83,6 +92,16 @@ app.get(
     failureRedirect: "/login",
   })
 );
+
+//TODO: Add a get route for the submit button
+//Think about how the logic should work with authentication.
+app.get("/submit", (req, res) => {
+  if (req.isAuthenticated()) {
+    res.render("submit.ejs");
+  } else {
+    res.redirect("/login");
+  }
+});
 
 app.post(
   "/login",
@@ -127,6 +146,29 @@ app.post("/register", async (req, res) => {
 
 //TODO: Create the post route for submit.
 //Handle the submitted data and add it to the database
+
+app.post("/submit", async (req, res) => {
+  try {
+    const secret = req.body.secret;
+    if (!secret) {
+      return res.redirect("/secrets");
+    }
+
+    const result = await db.query(
+      "UPDATE users SET secret = $1 WHERE id = $2 RETURNING *",
+      [secret, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error("User not found or no secret updated");
+    }
+
+    res.redirect("/secrets");
+  } catch (error) {
+    console.error("Error submitting secret:", error);
+    return res.redirect("/secrets");
+  }
+});
 
 passport.use(
   "local",
